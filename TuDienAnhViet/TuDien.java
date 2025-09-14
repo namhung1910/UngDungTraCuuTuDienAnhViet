@@ -1,123 +1,170 @@
 package TuDienAnhViet;
 
 import java.io.*;
+import java.nio.charset.StandardCharsets;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
-/**
- * TuDien: nạp dữ liệu từ CSV (KhoTu.csv) 
- * Lưu trữ vào HashMap<String, Entry>.
- */
 public class TuDien {
-    // Inner class biểu diễn một bản ghi
     public static class Entry {
         public String tiengAnh;
         public String tiengViet;
         public String tuLoai;
         public String viDu;
 
-        public Entry(String a, String v, String t, String vd) {
+        public Entry() {}
+
+        public Entry(String a, String v, String t, String ex) {
             this.tiengAnh = a;
             this.tiengViet = v;
             this.tuLoai = t;
-            this.viDu = vd;
+            this.viDu = ex;
         }
 
-        // Chuẩn hóa để gửi qua mạng (tránh chuỗi |||)
-        public String serializeForNetwork() {
-            return escape(tiengViet) + "|||" + escape(tuLoai) + "|||" + escape(viDu);
+        public String serializeForNetwork(boolean en2vi) {
+            String first = en2vi ? tiengViet : tiengAnh;
+            return escape(first) + "|||" + escape(nullToEmpty(tuLoai)) + "|||" + escape(nullToEmpty(viDu));
+        }
+
+        private String nullToEmpty(String s) {
+            return s == null ? "" : s;
         }
 
         private String escape(String s) {
             if (s == null) return "";
-            return s.replace("|||", "\\|||").replace("\n", "\\n").replace("\r", "");
+            String r = s.replace("\\", "\\\\");
+            r = r.replace("|||", "\\|||");
+            r = r.replace("\n", "\\n");
+            return r;
         }
     }
 
-    private final Map<String, Entry> map = new HashMap<>();
+    private final Map<String, Entry> mapEn = new ConcurrentHashMap<>();
+    private final Map<String, Entry> mapVn = new ConcurrentHashMap<>();
 
     public TuDien() {}
 
-    // Chuẩn hóa key: trim + lowercase
-    private static String normalizeKey(String s) {
-        if (s == null) return "";
-        return s.trim().toLowerCase();
-    }
-
-    public Entry lookup(String word) {
-        if (word == null) return null;
-        return map.get(normalizeKey(word));
-    }
-
-    // Nạp dữ liệu từ CSV
     public void loadFromCSV(String csvPath) throws IOException {
-        map.clear();
-        try (BufferedReader br = new BufferedReader(new InputStreamReader(new FileInputStream(csvPath), "UTF-8"))) {
-            String header = br.readLine(); // bỏ qua header nếu có
-            if (header == null) return;
-            // kiểm tra header có phải dòng tiêu đề không
-            boolean headerLooksLike = header.toLowerCase().contains("tienganh") || header.toLowerCase().contains("tiengviet");
-            if (!headerLooksLike) {
-                // dòng đầu tiên là dữ liệu thật → xử lý luôn
-                processCsvLine(header);
-            }
+        Map<String, Entry> newEn = new ConcurrentHashMap<>();
+        Map<String, Entry> newVn = new ConcurrentHashMap<>();
+
+        try (BufferedReader br = new BufferedReader(new InputStreamReader(new FileInputStream(csvPath), StandardCharsets.UTF_8))) {
             String line;
+            boolean firstLineMaybeHeader = true;
             while ((line = br.readLine()) != null) {
-                processCsvLine(line);
+                if (line.trim().isEmpty()) continue;
+                List<String> cols = parseCsvLine(line);
+                if (firstLineMaybeHeader) {
+                    firstLineMaybeHeader = false;
+                    if (cols.size() >= 1) {
+                        String c0 = cols.get(0).toLowerCase();
+                        if (c0.contains("tienganh") || c0.contains("tieng anh") || c0.contains("tiếng anh")) {
+                            continue;
+                        }
+                    }
+                }
+                while (cols.size() < 4) cols.add("");
+                String a = cols.get(0);
+                String v = cols.get(1);
+                String t = cols.get(2);
+                String ex = cols.get(3);
+                Entry e = new Entry(a, v, t, ex);
+                if (a != null && !a.trim().isEmpty()) {
+                    newEn.put(normalizeKey(a), e);
+                }
+                if (v != null && !v.trim().isEmpty()) {
+                    newVn.put(normalizeKey(v), e);
+                }
             }
         }
+
+        mapEn.clear();
+        mapEn.putAll(newEn);
+        mapVn.clear();
+        mapVn.putAll(newVn);
     }
 
-    // Kỳ vọng CSV có 4 cột: TiengAnh,TiengViet,TuLoai,ViDu
-    private void processCsvLine(String line) {
-        List<String> cols = parseCsvLine(line);
-        if (cols.size() < 2) return;
-        String a = cols.size() > 0 ? cols.get(0) : "";
-        String v = cols.size() > 1 ? cols.get(1) : "";
-        String t = cols.size() > 2 ? cols.get(2) : "";
-        String vd = cols.size() > 3 ? cols.get(3) : "";
-        Entry e = new Entry(a, v, t, vd);
-        map.put(normalizeKey(a), e);
-    }
-
-    // Parser CSV cơ bản: hỗ trợ field có dấu ngoặc kép
     private List<String> parseCsvLine(String line) {
-        List<String> tokens = new ArrayList<>();
-        if (line == null) return tokens;
+        List<String> out = new ArrayList<>();
         StringBuilder cur = new StringBuilder();
         boolean inQuotes = false;
         for (int i = 0; i < line.length(); i++) {
             char c = line.charAt(i);
-            if (c == '"') {
-                // bật/tắt inQuotes, xử lý dấu ngoặc kép kép
-                if (inQuotes && i + 1 < line.length() && line.charAt(i+1) == '"') {
-                    cur.append('"');
-                    i++; // bỏ qua ký tự tiếp theo
+            if (inQuotes) {
+                if (c == '"') {
+                    if (i + 1 < line.length() && line.charAt(i + 1) == '"') {
+                        cur.append('"');
+                        i++;
+                    } else {
+                        inQuotes = false;
+                    }
                 } else {
-                    inQuotes = !inQuotes;
+                    cur.append(c);
                 }
-            } else if (c == ',' && !inQuotes) {
-                tokens.add(cur.toString());
-                cur.setLength(0);
             } else {
-                cur.append(c);
+                if (c == '"') {
+                    inQuotes = true;
+                } else if (c == ',') {
+                    out.add(cur.toString());
+                    cur.setLength(0);
+                } else {
+                    cur.append(c);
+                }
             }
         }
-        tokens.add(cur.toString());
-        // trim khoảng trắng
-        for (int i = 0; i < tokens.size(); i++) {
-            tokens.set(i, tokens.get(i).trim());
-        }
-        return tokens;
+        out.add(cur.toString());
+        return out;
     }
 
-    // Lấy số lượng bản ghi
-    public int size() {
-        return map.size();
+    private String normalizeKey(String s) {
+        if (s == null) return "";
+        return s.trim().toLowerCase();
     }
 
-    // Thêm bản ghi trong runtime
+    public Entry lookupEn(String word) {
+        if (word == null) return null;
+        return mapEn.get(normalizeKey(word));
+    }
+
+    public Entry lookupVn(String word) {
+        if (word == null) return null;
+        return mapVn.get(normalizeKey(word));
+    }
+
+    public Entry lookup(String word) {
+        return lookupEn(word);
+    }
+
     public void addEntry(Entry e) {
-        if (e == null || e.tiengAnh == null) return;
-        map.put(normalizeKey(e.tiengAnh), e);
+        if (e == null) return;
+        if (e.tiengAnh != null && !e.tiengAnh.trim().isEmpty())
+            mapEn.put(normalizeKey(e.tiengAnh), e);
+        if (e.tiengViet != null && !e.tiengViet.trim().isEmpty())
+            mapVn.put(normalizeKey(e.tiengViet), e);
+    }
+
+    public int size() {
+        return mapEn.size();
+    }
+
+    public List<String> getSuggestions(boolean en2vi, String prefix, int maxSuggestions) {
+        Map<String, Entry> map = en2vi ? mapEn : mapVn;
+        String normalizedPrefix = normalizeKey(prefix);
+        List<String> suggestions = new ArrayList<>();
+        
+        for (String key : map.keySet()) {
+            if (key.startsWith(normalizedPrefix)) {
+                Entry entry = map.get(key);
+                String word = en2vi ? entry.tiengAnh : entry.tiengViet;
+                if (!suggestions.contains(word)) {
+                    suggestions.add(word);
+                    if (suggestions.size() >= maxSuggestions) {
+                        break;
+                    }
+                }
+            }
+        }
+        
+        return suggestions;
     }
 }
