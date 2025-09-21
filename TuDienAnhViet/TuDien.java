@@ -1,9 +1,7 @@
 package TuDienAnhViet;
 
-import java.io.*;
-import java.nio.charset.StandardCharsets;
 import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
+import org.bson.Document;
 
 public class TuDien {
     public static class Entry {
@@ -39,132 +37,71 @@ public class TuDien {
         }
     }
 
-    private final Map<String, Entry> mapEn = new ConcurrentHashMap<>();
-    private final Map<String, Entry> mapVn = new ConcurrentHashMap<>();
+    private final MongoDBConnector connector;
 
-    public TuDien() {}
-
-    public void loadFromCSV(String csvPath) throws IOException {
-        Map<String, Entry> newEn = new ConcurrentHashMap<>();
-        Map<String, Entry> newVn = new ConcurrentHashMap<>();
-
-        try (BufferedReader br = new BufferedReader(new InputStreamReader(new FileInputStream(csvPath), StandardCharsets.UTF_8))) {
-            String line;
-            boolean firstLineMaybeHeader = true;
-            while ((line = br.readLine()) != null) {
-                if (line.trim().isEmpty()) continue;
-                List<String> cols = parseCsvLine(line);
-                if (firstLineMaybeHeader) {
-                    firstLineMaybeHeader = false;
-                    if (cols.size() >= 1) {
-                        String c0 = cols.get(0).toLowerCase();
-                        if (c0.contains("tienganh") || c0.contains("tieng anh") || c0.contains("tiếng anh")) {
-                            continue;
-                        }
-                    }
-                }
-                while (cols.size() < 4) cols.add("");
-                String a = cols.get(0);
-                String v = cols.get(1);
-                String t = cols.get(2);
-                String ex = cols.get(3);
-                Entry e = new Entry(a, v, t, ex);
-                if (a != null && !a.trim().isEmpty()) {
-                    newEn.put(normalizeKey(a), e);
-                }
-                if (v != null && !v.trim().isEmpty()) {
-                    newVn.put(normalizeKey(v), e);
-                }
-            }
-        }
-
-        mapEn.clear();
-        mapEn.putAll(newEn);
-        mapVn.clear();
-        mapVn.putAll(newVn);
-    }
-
-    private List<String> parseCsvLine(String line) {
-        List<String> out = new ArrayList<>();
-        StringBuilder cur = new StringBuilder();
-        boolean inQuotes = false;
-        for (int i = 0; i < line.length(); i++) {
-            char c = line.charAt(i);
-            if (inQuotes) {
-                if (c == '"') {
-                    if (i + 1 < line.length() && line.charAt(i + 1) == '"') {
-                        cur.append('"');
-                        i++;
-                    } else {
-                        inQuotes = false;
-                    }
-                } else {
-                    cur.append(c);
-                }
-            } else {
-                if (c == '"') {
-                    inQuotes = true;
-                } else if (c == ',') {
-                    out.add(cur.toString());
-                    cur.setLength(0);
-                } else {
-                    cur.append(c);
-                }
-            }
-        }
-        out.add(cur.toString());
-        return out;
-    }
-
-    private String normalizeKey(String s) {
-        if (s == null) return "";
-        return s.trim().toLowerCase();
+    public TuDien() {
+        connector = new MongoDBConnector();
     }
 
     public Entry lookupEn(String word) {
         if (word == null) return null;
-        return mapEn.get(normalizeKey(word));
+        Document doc = connector.lookupEn(word);
+        if (doc == null) return null;
+        return documentToEntry(doc);
     }
 
     public Entry lookupVn(String word) {
         if (word == null) return null;
-        return mapVn.get(normalizeKey(word));
+        Document doc = connector.lookupVn(word);
+        if (doc == null) return null;
+        return documentToEntry(doc);
     }
 
     public Entry lookup(String word) {
         return lookupEn(word);
     }
 
-    public void addEntry(Entry e) {
-        if (e == null) return;
-        if (e.tiengAnh != null && !e.tiengAnh.trim().isEmpty())
-            mapEn.put(normalizeKey(e.tiengAnh), e);
-        if (e.tiengViet != null && !e.tiengViet.trim().isEmpty())
-            mapVn.put(normalizeKey(e.tiengViet), e);
+    private Entry documentToEntry(Document doc) {
+        return new Entry(
+            doc.getString("TiengAnh"),
+            doc.getString("TiengViet"),
+            doc.getString("TuLoai"),
+            doc.getString("ViDu")
+        );
     }
 
-    public int size() {
-        return mapEn.size();
+    public void addEntry(Entry e) {
+        if (e == null) return;
+        connector.addEntry(e.tiengAnh, e.tiengViet, e.tuLoai, e.viDu);
+    }
+
+    public boolean removeEntryByEnglish(String tiengAnh) {
+        if (tiengAnh == null) return false;
+        Entry entry = lookupEn(tiengAnh);
+        if (entry != null) {
+            connector.deleteEntry(tiengAnh);
+            return true;
+        }
+        return false;
+    }
+
+    public void updateEntry(String oldEnglish, Entry newEntry) {
+        connector.updateEntry(oldEnglish, newEntry.tiengAnh, newEntry.tiengViet, newEntry.tuLoai, newEntry.viDu);
     }
 
     public List<String> getSuggestions(boolean en2vi, String prefix, int maxSuggestions) {
-        Map<String, Entry> map = en2vi ? mapEn : mapVn;
-        String normalizedPrefix = normalizeKey(prefix);
-        List<String> suggestions = new ArrayList<>();
-        
-        for (String key : map.keySet()) {
-            if (key.startsWith(normalizedPrefix)) {
-                Entry entry = map.get(key);
-                String word = en2vi ? entry.tiengAnh : entry.tiengViet;
-                if (!suggestions.contains(word)) {
-                    suggestions.add(word);
-                    if (suggestions.size() >= maxSuggestions) {
-                        break;
-                    }
-                }
-            }
+        return connector.getSuggestions(en2vi, prefix, maxSuggestions);
+    }
+
+    public Collection<Entry> getAllEntries() {
+        List<Entry> entries = new ArrayList<>();
+        for (Document doc : connector.getEntries()) {
+            entries.add(documentToEntry(doc));
         }
-        
-        return suggestions;
+        return entries;
+    }
+
+    public int size() {
+        return (int) connector.getEntries().size();
     }
 }
