@@ -15,7 +15,7 @@ public class Client {
     private JTextField tfWord;
     private JComboBox<String> cbMode;
     private JLabel lblTarget;
-    private JTextArea taTarget, taViDu, taTuLoai;
+    private JTextArea taTarget, taViDu, taTuLoai, taPhienAm;
     private JList<String> suggestionList, historyList;
     private JPopupMenu suggestionPopup;
     private DefaultListModel<String> suggestionListModel, historyListModel;
@@ -317,16 +317,45 @@ public class Client {
         resultPanel.add(createCardPanel(null, wordTypePanel));
         leftPanel.add(createCardPanel("Kết quả dịch", resultPanel));
 
+        // Thay đổi phần ví dụ: chia thành 2 phần: ví dụ và phiên âm
+        JPanel exampleAndPhoneticPanel = new JPanel(new GridLayout(1, 2, 10, 0));
+        exampleAndPhoneticPanel.setBackground(BG);
+
         JPanel examplePanel = new JPanel(new BorderLayout());
+        JLabel lblViDu = new JLabel("Ví dụ");
+        lblViDu.setFont(new Font("Segoe UI", Font.BOLD, 14));
+        lblViDu.setForeground(PRIMARY_DARK);
+        lblViDu.setBorder(new EmptyBorder(0, 0, 8, 0));
+
         taViDu = new RoundedTextArea();
         taViDu.setLineWrap(true);
         taViDu.setWrapStyleWord(true);
         applyStyle(taViDu);
         
         JScrollPane exampleScroll = createScroll(taViDu);
+        examplePanel.add(lblViDu, BorderLayout.NORTH);
         examplePanel.add(exampleScroll, BorderLayout.CENTER);
+
+        JPanel phoneticPanel = new JPanel(new BorderLayout());
+        JLabel lblPhienAm = new JLabel("Phiên âm");
+        lblPhienAm.setFont(new Font("Segoe UI", Font.BOLD, 14));
+        lblPhienAm.setForeground(PRIMARY_DARK);
+        lblPhienAm.setBorder(new EmptyBorder(0, 0, 8, 0));
+
+        taPhienAm = new RoundedTextArea();
+        taPhienAm.setLineWrap(true);
+        taPhienAm.setWrapStyleWord(true);
+        applyStyle(taPhienAm);
+        taPhienAm.setEditable(false);
         
-        leftPanel.add(createCardPanel("Ví dụ", examplePanel));
+        JScrollPane phoneticScroll = createScroll(taPhienAm);
+        phoneticPanel.add(lblPhienAm, BorderLayout.NORTH);
+        phoneticPanel.add(phoneticScroll, BorderLayout.CENTER);
+
+        exampleAndPhoneticPanel.add(createCardPanel(null, examplePanel));
+        exampleAndPhoneticPanel.add(createCardPanel(null, phoneticPanel));
+        
+        leftPanel.add(createCardPanel("Ví dụ và Phiên âm", exampleAndPhoneticPanel));
         splitPane.setLeftComponent(leftPanel);
 
         JPanel rightPanel = new JPanel(new BorderLayout());
@@ -440,6 +469,7 @@ public class Client {
         taTarget.setText(""); 
         taTuLoai.setText(""); 
         taViDu.setText("");
+        taPhienAm.setText("");
         suggestionPopup.setVisible(false);
     }
 
@@ -461,12 +491,14 @@ public class Client {
             
             if (resp.startsWith("FOUND|||")) {
                 String[] parts = resp.substring("FOUND|||".length()).split("\\|\\|\\|", -1);
+                // parts[0]: nghĩa, parts[1]: từ loại, parts[2]: ví dụ, parts[3]: phiên âm
                 taTarget.setText(parts.length > 0 ? unescape(parts[0]) : ""); 
                 taTuLoai.setText(parts.length > 1 ? unescape(parts[1]) : ""); 
                 taViDu.setText(parts.length > 2 ? unescape(parts[2]) : "");
+                taPhienAm.setText(parts.length > 3 ? unescape(parts[3]) : "");
                 saveHistory(mode, word, taTarget.getText());
             } else if (resp.startsWith("NOTFOUND")) {
-                taTarget.setText(""); taTuLoai.setText(""); taViDu.setText("");
+                taTarget.setText(""); taTuLoai.setText(""); taViDu.setText(""); taPhienAm.setText("");
                 JOptionPane.showMessageDialog(frame, "Không tìm thấy từ: " + word);
             } else JOptionPane.showMessageDialog(frame, "Phản hồi không hợp lệ từ server.");
         } catch (IOException ex) {

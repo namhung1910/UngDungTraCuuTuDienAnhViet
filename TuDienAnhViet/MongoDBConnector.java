@@ -5,10 +5,10 @@ import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoClients;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
+import com.mongodb.client.model.Sorts;
 import org.bson.Document;
 
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Date;
 import java.util.List;
 import java.util.regex.Pattern;
@@ -19,83 +19,95 @@ public class MongoDBConnector {
     private static final String COLLECTION_NAME = "KhoTu";
     private static final String HISTORY_COLLECTION_NAME = "LichSuDich";
 
+    private static MongoDBConnector instance;
     private MongoClient mongoClient;
     private MongoDatabase database;
     private MongoCollection<Document> collection;
     private MongoCollection<Document> historyCollection;
 
-    public MongoDBConnector() {
+    // 1. Chuyển sang private constructor để dùng Singleton
+    private MongoDBConnector() {
         mongoClient = MongoClients.create(CONNECTION_STRING);
         database = mongoClient.getDatabase(DATABASE_NAME);
         collection = database.getCollection(COLLECTION_NAME);
         historyCollection = database.getCollection(HISTORY_COLLECTION_NAME);
     }
 
-    public Document lookupEn(String word) {
+    // 2. Phương thức getInstance (Singleton)
+    public static synchronized MongoDBConnector getInstance() {
+        if (instance == null) {
+            instance = new MongoDBConnector();
+        }
+        return instance;
+    }
+
+    // 3. Tối ưu lookup dùng 1 hàm private và $regex
+    private Document lookup(String field, String word) {
         if (word == null) return null;
-        // Tìm kiếm không phân biệt hoa thường nhưng vẫn giữ nguyên giá trị gốc trong DB
-        Document query = new Document("$or", Arrays.asList(
-            new Document("TiengAnh", word.trim()),
-            new Document("TiengAnh", word.trim().toLowerCase()),
-            new Document("TiengAnh", word.trim().toUpperCase())
-        ));
+        // Dùng $regex với cờ 'i' (không phân biệt hoa thường) và neo (^) ($)
+        // để tìm chính xác từ, không phải tìm tiền tố.
+        Document query = new Document(field,
+                new Document("$regex", "^" + Pattern.quote(word.trim()) + "$")
+                        .append("$options", "i"));
         return collection.find(query).first();
     }
 
+    public Document lookupEn(String word) {
+        return lookup("TiengAnh", word);
+    }
+
     public Document lookupVn(String word) {
-        if (word == null) return null;
-        // Tìm kiếm không phân biệt hoa thường nhưng vẫn giữ nguyên giá trị gốc trong DB
-        Document query = new Document("$or", Arrays.asList(
-            new Document("TiengViet", word.trim()),
-            new Document("TiengViet", word.trim().toLowerCase()),
-            new Document("TiengViet", word.trim().toUpperCase())
-        ));
-        return collection.find(query).first();
+        return lookup("TiengViet", word);
     }
 
     public List<String> getSuggestions(boolean en2vi, String prefix, int maxSuggestions) {
         String field = en2vi ? "TiengAnh" : "TiengViet";
         List<String> suggestions = new ArrayList<>();
         
-        // Sử dụng $regex với cờ 'i' để tìm kiếm không phân biệt hoa thường
-        Document regex = new Document(field, 
-            new Document("$regex", "^" + Pattern.quote(prefix.trim()))
-            .append("$options", "i"));
+        Document regex = new Document(field,
+                new Document("$regex", "^" + Pattern.quote(prefix.trim()))
+                        .append("$options", "i"));
         
         FindIterable<Document> results = collection.find(regex).limit(maxSuggestions);
         for (Document doc : results) {
             suggestions.add(doc.getString(field));
         }
-        
         return suggestions;
     }
 
     public List<Document> getEntries() {
         List<Document> entries = new ArrayList<>();
-        FindIterable<Document> iterable = collection.find();
+        // Sắp xếp theo TiengAnh A-Z
+        FindIterable<Document> iterable = collection.find().sort(Sorts.ascending("TiengAnh"));
         for (Document doc : iterable) {
             entries.add(doc);
         }
         return entries;
     }
 
-    public void addEntry(String tiengAnh, String tiengViet, String tuLoai, String viDu) {
-        // Giữ nguyên định dạng hoa/thường của người dùng
+    // 4. Thêm hàm đếm số lượng từ (hiệu quả hơn)
+    public long getEntryCount() {
+        return collection.countDocuments();
+    }
+
+    public void addEntry(String tiengAnh, String tiengViet, String tuLoai, String viDu, String phienAm) {
         Document doc = new Document()
                 .append("TiengAnh", tiengAnh.trim())
                 .append("TiengViet", tiengViet.trim())
                 .append("TuLoai", tuLoai)
-                .append("ViDu", viDu);
+                .append("ViDu", viDu)
+                .append("PhienAm", phienAm);
         collection.insertOne(doc);
     }
 
-    public void updateEntry(String oldTiengAnh, String tiengAnh, String tiengViet, String tuLoai, String viDu) {
+    public void updateEntry(String oldTiengAnh, String tiengAnh, String tiengViet, String tuLoai, String viDu, String phienAm) {
         Document query = new Document("TiengAnh", oldTiengAnh);
         Document update = new Document("$set", new Document()
                 .append("TiengAnh", tiengAnh)
                 .append("TiengViet", tiengViet)
                 .append("TuLoai", tuLoai)
-                .append("ViDu", viDu));
+                .append("ViDu", viDu)
+                .append("PhienAm", phienAm));
         collection.updateOne(query, update);
     }
 
@@ -125,6 +137,7 @@ public class MongoDBConnector {
     public void close() {
         if (mongoClient != null) {
             mongoClient.close();
+            instance = null; // Reset instance khi close
         }
     }
 }

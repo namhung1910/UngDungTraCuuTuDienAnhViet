@@ -9,19 +9,21 @@ public class TuDien {
         public String tiengViet;
         public String tuLoai;
         public String viDu;
+        public String phienAm;
 
         public Entry() {}
 
-        public Entry(String a, String v, String t, String ex) {
+        public Entry(String a, String v, String t, String ex, String ph) {
             this.tiengAnh = a;
             this.tiengViet = v;
             this.tuLoai = t;
             this.viDu = ex;
+            this.phienAm = ph;
         }
 
         public String serializeForNetwork(boolean en2vi) {
             String first = en2vi ? tiengViet : tiengAnh;
-            return escape(first) + "|||" + escape(nullToEmpty(tuLoai)) + "|||" + escape(nullToEmpty(viDu));
+            return escape(first) + "|||" + escape(nullToEmpty(tuLoai)) + "|||" + escape(nullToEmpty(viDu)) + "|||" + escape(nullToEmpty(phienAm));
         }
 
         private String nullToEmpty(String s) {
@@ -37,10 +39,12 @@ public class TuDien {
         }
     }
 
+    // 1. Dùng MongoDBConnector.getInstance()
     private final MongoDBConnector connector;
 
     public TuDien() {
-        connector = new MongoDBConnector();
+        // Thay vì tạo mới, ta lấy instance duy nhất
+        connector = MongoDBConnector.getInstance();
     }
 
     public Entry lookupEn(String word) {
@@ -63,16 +67,17 @@ public class TuDien {
 
     private Entry documentToEntry(Document doc) {
         return new Entry(
-            doc.getString("TiengAnh"),
-            doc.getString("TiengViet"),
-            doc.getString("TuLoai"),
-            doc.getString("ViDu")
+                doc.getString("TiengAnh"),
+                doc.getString("TiengViet"),
+                doc.getString("TuLoai"),
+                doc.getString("ViDu"),
+                doc.getString("PhienAm")
         );
     }
 
     public void addEntry(Entry e) {
         if (e == null) return;
-        connector.addEntry(e.tiengAnh, e.tiengViet, e.tuLoai, e.viDu);
+        connector.addEntry(e.tiengAnh, e.tiengViet, e.tuLoai, e.viDu, e.phienAm);
     }
 
     public boolean removeEntryByEnglish(String tiengAnh) {
@@ -86,7 +91,7 @@ public class TuDien {
     }
 
     public void updateEntry(String oldEnglish, Entry newEntry) {
-        connector.updateEntry(oldEnglish, newEntry.tiengAnh, newEntry.tiengViet, newEntry.tuLoai, newEntry.viDu);
+        connector.updateEntry(oldEnglish, newEntry.tiengAnh, newEntry.tiengViet, newEntry.tuLoai, newEntry.viDu, newEntry.phienAm);
     }
 
     public List<String> getSuggestions(boolean en2vi, String prefix, int maxSuggestions) {
@@ -101,7 +106,9 @@ public class TuDien {
         return entries;
     }
 
+    // 2. Tối ưu hàm size()
     public int size() {
-        return (int) connector.getEntries().size();
+        // Dùng hàm đếm hiệu quả, thay vì tải toàn bộ CSDL
+        return (int) connector.getEntryCount();
     }
 }
