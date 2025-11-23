@@ -101,7 +101,7 @@ Từ Điển Anh-Việt là ứng dụng từ điển trực tuyến được ph
     </p>
 - Giao diện lịch sử dịch:
     <p align="center">
-    <img src="docs/ClientLichSuDich.png" alt="Server Lich Su Dich" width="800"/>
+    <img src="docs/ClientLichSuDich.png" alt="Server Lich Su Dich" width="400"/>
     </p>
 ### 🖥️ Giao diện Server
 - Giao diện quản lý từ:
